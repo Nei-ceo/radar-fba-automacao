@@ -11,26 +11,26 @@ async def run():
         
         url_utimix = "https://www.utimix.com/novidades/?utm_source=brevo&utm_campaign=Seguimento%20%201%20Pedido%20-%204%20envio&utm_medium=email&utm_id=22"
         
-        print("🔗 Acessando Novidades Utimix...")
+        print("🔗 Acessando Novidades Utimix (Modo Rápido)...")
         try:
-            # Vai para a página e espera até que não haja atividade na rede
-            await page.goto(url_utimix, wait_until="networkidle", timeout=60000)
+            # MUDANÇA CRUCIAL: "domcontentloaded" avança assim que o HTML base carrega, sem esperar imagens/rastreadores.
+            await page.goto(url_utimix, wait_until="domcontentloaded", timeout=60000)
             
-            # Força o scroll para carregar todos os elementos visíveis
-            print("📜 Rolando a página para carregar imagens e preços...")
-            for _ in range(3):
-                await page.mouse.wheel(0, 800)
-                await asyncio.sleep(2)
+            # Força uma espera fixa de 5 segundos para o site "respirar"
+            await asyncio.sleep(5)
+            
+            print("📜 Rolando a página para renderizar imagens e preços...")
+            # Rolagem mais curta, mas em mais passos
+            for _ in range(5):
+                await page.mouse.wheel(0, 500)
+                await asyncio.sleep(1)
 
-            # Espera até que um produto específico seja visível no DOM
-            await page.wait_for_selector('.product-item', timeout=15000)
-            
             produtos_utimix = await page.evaluate('''() => {
                 const cards = Array.from(document.querySelectorAll('.product-item'));
                 return cards.map(c => {
                     const nome = (c.querySelector('.product-name a')?.innerText || "").trim();
                     const precoText = c.querySelector('.price')?.innerText || "";
-                    // Limpa o texto do preço, ex: "A partir de: R$ 8,99" para "8,99"
+                    // Regex para apanhar o número do preço, ignorando texto à volta
                     const precoMatch = precoText.match(/R\\$\\s*([0-9.,]+)/);
                     const preco = precoMatch ? precoMatch[1].trim() : "0";
                     const img = c.querySelector('img')?.src || "";
@@ -41,7 +41,7 @@ async def run():
             print(f"📦 Encontrados {len(produtos_utimix)} produtos para análise visual.")
 
             if len(produtos_utimix) == 0:
-                print("⚠️ Falha ao encontrar produtos após rolagem e espera.")
+                print("⚠️ Nenhum produto carregado. O site pode estar lento hoje.")
                 await browser.close()
                 return
 
