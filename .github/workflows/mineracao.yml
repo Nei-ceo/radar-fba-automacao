@@ -2,38 +2,29 @@ name: Mineracao Automatica Amazon
 
 on:
   schedule:
-    # Este comando (CRON) define quando o robô acorda.
-    # '0 08 * * *' = Todo dia às 08:00 UTC (05:00 da manhã no horário de Brasília)
-    - cron: '0 08 * * *'
-  workflow_dispatch: # Mantém o botão manual caso você queira rodar extra
+    - cron: '0 08 * * *' # Roda às 05:00 da manhã de Brasília
+  workflow_dispatch: # Ativa o botão manual
 
 jobs:
   mineracao:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      
     steps:
-      - name: Checkout do codigo
-        uses: actions/checkout@v4
-
-      - name: Configurar Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Instalar dependencias
+      - name: Instalar tudo
         run: |
-          pip install -r requirements.txt
+          pip install streamlit playwright pandas
           playwright install chromium
-
-      - name: Executar Robo
+      - name: Rodar Robo
         run: python robo.py
-
-      - name: Salvar resultados
+      - name: Salvar no GitHub
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add dados_fba.json
-          git commit -m "Execução automática diária: $(date +'%Y-%m-%d %H:%M')" || exit 0
+          git commit -m "Update automatico" || exit 0
           git push
