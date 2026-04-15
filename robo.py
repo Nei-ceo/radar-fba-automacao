@@ -5,67 +5,80 @@ from playwright.async_api import async_playwright
 
 async def run():
     async with async_playwright() as p:
-        # Lançando o navegador
         browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
+        # Simulamos um navegador real para evitar bloqueios do servidor
+        context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        page = await context.new_page()
         
-        print("🔗 Acessando Utimix...")
-        await page.goto("https://www.utimix.com/novidades/", wait_until="networkidle", timeout=90000)
+        # Link exato que enviou
+        url_utimix = "https://www.utimix.com/novidades/?utm_source=brevo&utm_campaign=Seguimento%20%201%20Pedido%20-%204%20envio&utm_medium=email&utm_id=22"
         
-        # Captura os produtos da Utimix
-        produtos_utimix = await page.evaluate('''() => {
-            const itens = Array.from(document.querySelectorAll('.product-item'));
-            return itens.map(i => ({
-                nome: i.querySelector('.product-name a')?.innerText.trim() || "",
-                preco: i.querySelector('.price')?.innerText.replace('R$', '').trim() || "0"
-            })).filter(x => x.nome.length > 3);
-        }''')
+        print("🔗 Acessando Novidades Utimix...")
+        try:
+            # 'commit' faz com que ele comece a ler assim que o HTML chegar, sem esperar imagens/rastreadores
+            await page.goto(url_utimix, wait_until="commit", timeout=60000)
+            
+            # Espera apenas 5 segundos para o catálogo renderizar
+            await asyncio.sleep(5)
+            
+            # Extração focada nos seletores de preço e nome da Utimix
+            produtos_utimix = await page.evaluate('''() => {
+                const cards = Array.from(document.querySelectorAll('.product-item'));
+                return cards.map(c => {
+                    const nome = c.querySelector('.product-name a')?.innerText.trim();
+                    const preco = c.querySelector('.price')?.innerText.replace('R$', '').trim();
+                    return { nome, preco };
+                }).filter(p => p.nome && p.preco && p.preco !== "0");
+            }''')
+            
+            print(f"📦 Sucesso! Encontrados {len(produtos_utimix)} produtos com preço visível.")
 
-        print(f"📦 Encontrados {len(produtos_utimix)} itens. Iniciando busca na Amazon...")
+        except Exception as e:
+            print(f"❌ Erro ao aceder à Utimix: {e}")
+            await browser.close()
+            return
 
         resultados = []
-        for item in produtos_utimix[:40]: # Vamos testar com os primeiros 40
+        # Analisamos os primeiros 30 para manter a execução rápida e segura
+        for item in produtos_utimix[:30]:
             try:
-                # LIMPEZA CRÍTICA: Remove referências e códigos do nome para a Amazon achar
-                # Exemplo: "Ref 123 - Organizador" vira apenas "Organizador"
-                nome_limpo = item['nome'].split('-')[-1].split('Ref')[0].strip()
+                # Limpa o nome para a busca na Amazon (remove referências e códigos)
+                termo_busca = item['nome'].split('-')[-1].strip()
+                print(f"🔍 Cruzando na Amazon: {termo_busca}")
                 
-                print(f"🔍 Buscando: {nome_limpo}")
-                search_url = f"https://www.amazon.com.br/s?k={nome_limpo.replace(' ', '+')}"
-                
-                await page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
-                await asyncio.sleep(3) # Pausa para carregar preços
+                await page.goto(f"https://www.amazon.com.br/s?k={termo_busca.replace(' ', '+')}", wait_until="domcontentloaded")
+                await asyncio.sleep(2)
 
-                # Pega o primeiro produto real da Amazon
-                card = await page.query_selector('.s-result-item[data-asin]')
+                # Captura o primeiro anúncio relevante
+                card = await page.query_selector(".s-result-item[data-asin]")
                 if card:
-                    asin = await card.get_attribute('data-asin')
-                    preco_el = await card.query_selector('.a-price-whole')
-                    titulo_el = await card.query_selector('h2 span')
-
-                    if preco_el and titulo_el:
-                        venda = (await preco_el.inner_text()).replace('.', '').replace(',', '.').strip()
-                        custo = item['preco'].replace('.', '').replace(',', '.').strip()
+                    asin = await card.get_attribute("data-asin")
+                    preco_amz_el = await card.query_selector(".a-price-whole")
+                    
+                    if preco_amz_el:
+                        venda = float((await preco_amz_el.inner_text()).replace('.', '').replace(',', '.').strip())
+                        custo = float(item['preco'].replace('.', '').replace(',', '.').strip())
+                        
+                        # Cálculo: Venda - Custo - (15% Comissão + R$ 13 taxa FBA estimada)
+                        lucro = round(venda - custo - (venda * 0.15 + 13), 2)
                         
                         resultados.append({
-                            "titulo": await titulo_el.inner_text(),
-                            "venda_amazon": float(venda),
-                            "custo_utimix": float(custo),
-                            "lucro_liquido": round(float(venda) - float(custo) - 15, 2), # Calculo bruto rápido
-                            "roi": 0,
+                            "titulo": item['nome'][:60],
+                            "venda_amazon": venda,
+                            "custo_utimix": custo,
+                            "lucro_liquido": lucro,
+                            "roi": round((lucro / custo) * 100, 2) if custo > 0 else 0,
                             "link": f"https://www.amazon.com.br/dp/{asin}"
                         })
-                        print(f"✅ Achou: {nome_limpo}")
-            except Exception as e:
-                print(f"Erro no item {item['nome']}: {e}")
+            except:
                 continue
 
-        # Salva o resultado
+        # Guarda os dados para o seu Dashboard
         with open("dados_fba.json", "w", encoding="utf-8") as f:
             json.dump(resultados, f, indent=2, ensure_ascii=False)
         
         await browser.close()
-        print("🏁 Fim da varredura.")
+        print(f"✅ Processo concluído. Verifique o seu Dashboard!")
 
 if __name__ == "__main__":
     asyncio.run(run())
