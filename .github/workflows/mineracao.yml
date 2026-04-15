@@ -1,17 +1,21 @@
 name: Mineracao Manual Amazon
 
 on:
-  workflow_dispatch: # Ativa o botão de "Play" manual
+  workflow_dispatch: 
 
 jobs:
   mineracao:
     runs-on: ubuntu-latest
+    # Adicionamos isso para reforçar a permissão de escrita via código
+    permissions:
+      contents: write
+      
     steps:
       - name: Checkout do codigo
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4 # Atualizado v3 -> v4
 
       - name: Configurar Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5 # Atualizado v4 -> v5
         with:
           python-version: '3.11'
 
@@ -25,8 +29,8 @@ jobs:
 
       - name: Salvar resultados
         run: |
-          git config --global user.name "GitHub Action"
-          git config --global user.email "action@github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add dados_fba.json
-          git commit -m "Execução manual do robô" || exit 0
+          git commit -m "Execução manual: $(date +'%Y-%m-%d %H:%M')" || exit 0
           git push
