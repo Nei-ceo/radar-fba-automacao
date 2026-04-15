@@ -2,30 +2,48 @@ import streamlit as st
 import json
 import os
 
-st.set_page_config(page_title="Radar de Lucro Real", layout="wide")
-
-st.title("💰 Comparativo Real: Utimix vs Amazon")
-st.info("Os preços abaixo são capturados diretamente dos dois sites em tempo real.")
+st.set_page_config(page_title="Radar Visual FBA", layout="wide")
+st.title("👁️ Validação Visual: Utimix vs Amazon")
 
 if os.path.exists("dados_fba.json"):
     with open("dados_fba.json", "r", encoding="utf-8") as f:
         dados = json.load(f)
 
     if not dados:
-        st.warning("Nenhum produto com lucro positivo encontrado nesta rodada.")
+        st.warning("Nenhum produto encontrado nesta rodada.")
     
     for item in dados:
         with st.container(border=True):
-            c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
+            # Layout em 4 colunas para caber fotos e dados
+            c1, c2, c3, c4 = st.columns([1, 1, 2, 1])
+            
             with c1:
-                st.markdown(f"**{item['titulo']}**")
-                st.caption(f"[Abrir anúncio na Amazon]({item['link']})")
+                st.caption("📦 Fornecedor (Utimix)")
+                if item.get("img_utimix"):
+                    st.image(item["img_utimix"], width=120)
+                else:
+                    st.write("Sem foto")
+
             with c2:
-                st.metric("Venda Amazon", f"R$ {item['venda_amazon']}")
+                st.caption("🛒 Amazon (Concorrente)")
+                if item.get("img_amazon"):
+                    st.image(item["img_amazon"], width=120)
+                else:
+                    st.write("Sem foto")
+
             with c3:
-                st.metric("Custo Utimix", f"R$ {item['custo_utimix']}")
+                st.markdown(f"**{item['titulo']}**")
+                st.caption(f"ASIN: {item['link'].split('/')[-1]}")
+                st.link_button("Abrir Anúncio na Amazon", item['link'])
+
             with c4:
-                # Cor verde para lucro positivo
-                st.metric("Lucro Líquido", f"R$ {item['lucro_liquido']}", f"{item['roi']}% ROI")
+                st.metric("Venda Amazon", f"R$ {item['venda_amazon']}")
+                st.metric("Custo Utimix", f"R$ {item['custo_utimix']}")
+                
+                # Destaca se o lucro for negativo
+                if item['lucro_liquido'] > 0:
+                    st.success(f"Lucro: R$ {item['lucro_liquido']} ({item['roi']}%)")
+                else:
+                    st.error(f"Prejuízo: R$ {item['lucro_liquido']}")
 else:
-    st.error("Aguardando primeira execução do robô no GitHub.")
+    st.info("Aguardando os dados do robô...")
