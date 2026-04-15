@@ -3,69 +3,69 @@ import sys
 import json
 from playwright.async_api import async_playwright
 
-async def calcular_analise(preco_venda, preco_custo):
-    comissao = preco_venda * 0.15
-    imposto = preco_venda * 0.06
-    taxa_fba = 13.00
-    sobra = preco_venda - (comissao + imposto + taxa_fba)
-    lucro = sobra - preco_custo
-    roi = (lucro / preco_custo * 100) if preco_custo > 0 else 0
-    return round(sobra, 2), round(lucro, 2), round(roi, 2)
-
 async def run():
     async with async_playwright() as p:
+        # Lançando o navegador
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
         
         print("🔗 Acessando Utimix...")
-        try:
-            await page.goto("https://www.utimix.com/novidades/", timeout=60000)
-            await page.wait_for_load_state("networkidle")
-            
-            produtos_brutos = await page.evaluate('''() => {
-                const itens = Array.from(document.querySelectorAll('.product-item'));
-                return itens.map(i => ({
-                    nome: i.querySelector('.product-name a')?.innerText.trim(),
-                    preco: i.querySelector('.price')?.innerText.replace('R$', '').trim() || "0"
-                })).filter(x => x.nome).slice(0, 30);
-            }''')
-        except Exception as e:
-            print(f"Erro na Utimix: {e}")
-            await browser.close()
-            return
+        await page.goto("https://www.utimix.com/novidades/", wait_until="networkidle", timeout=90000)
+        
+        # Captura os produtos da Utimix
+        produtos_utimix = await page.evaluate('''() => {
+            const itens = Array.from(document.querySelectorAll('.product-item'));
+            return itens.map(i => ({
+                nome: i.querySelector('.product-name a')?.innerText.trim() || "",
+                preco: i.querySelector('.price')?.innerText.replace('R$', '').trim() || "0"
+            })).filter(x => x.nome.length > 3);
+        }''')
+
+        print(f"📦 Encontrados {len(produtos_utimix)} itens. Iniciando busca na Amazon...")
 
         resultados = []
-        for p_uti in produtos_brutos:
+        for item in produtos_utimix[:40]: # Vamos testar com os primeiros 40
             try:
-                custo = float(p_uti['preco'].replace('.', '').replace(',', '.'))
-                if custo <= 0: continue
+                # LIMPEZA CRÍTICA: Remove referências e códigos do nome para a Amazon achar
+                # Exemplo: "Ref 123 - Organizador" vira apenas "Organizador"
+                nome_limpo = item['nome'].split('-')[-1].split('Ref')[0].strip()
+                
+                print(f"🔍 Buscando: {nome_limpo}")
+                search_url = f"https://www.amazon.com.br/s?k={nome_limpo.replace(' ', '+')}"
+                
+                await page.goto(search_url, wait_until="domcontentloaded", timeout=60000)
+                await asyncio.sleep(3) # Pausa para carregar preços
 
-                print(f"🔍 Buscando: {p_uti['nome'][:30]}")
-                search_url = f"https://www.amazon.com.br/s?k={p_uti['nome'].split('-')[0].strip()}"
-                await page.goto(search_url, timeout=60000)
-                
-                preco_el = await page.query_selector('.a-price-whole')
-                asin_el = await page.query_selector('[data-asin]')
-                
-                if preco_el and asin_el:
-                    venda = float((await preco_el.inner_text()).replace('.', '').replace(',', '.').strip())
-                    asin = await asin_el.get_attribute('data-asin')
-                    
-                    sobra, lucro, roi = await calcular_analise(venda, custo)
-                    if lucro > 0:
+                # Pega o primeiro produto real da Amazon
+                card = await page.query_selector('.s-result-item[data-asin]')
+                if card:
+                    asin = await card.get_attribute('data-asin')
+                    preco_el = await card.query_selector('.a-price-whole')
+                    titulo_el = await card.query_selector('h2 span')
+
+                    if preco_el and titulo_el:
+                        venda = (await preco_el.inner_text()).replace('.', '').replace(',', '.').strip()
+                        custo = item['preco'].replace('.', '').replace(',', '.').strip()
+                        
                         resultados.append({
-                            "titulo": p_uti['nome'][:60],
-                            "venda_amazon": venda,
-                            "custo_utimix": custo,
-                            "lucro_liquido": lucro,
-                            "roi": roi,
+                            "titulo": await titulo_el.inner_text(),
+                            "venda_amazon": float(venda),
+                            "custo_utimix": float(custo),
+                            "lucro_liquido": round(float(venda) - float(custo) - 15, 2), # Calculo bruto rápido
+                            "roi": 0,
                             "link": f"https://www.amazon.com.br/dp/{asin}"
                         })
-            except: continue
+                        print(f"✅ Achou: {nome_limpo}")
+            except Exception as e:
+                print(f"Erro no item {item['nome']}: {e}")
+                continue
 
+        # Salva o resultado
         with open("dados_fba.json", "w", encoding="utf-8") as f:
             json.dump(resultados, f, indent=2, ensure_ascii=False)
+        
         await browser.close()
+        print("🏁 Fim da varredura.")
 
 if __name__ == "__main__":
     asyncio.run(run())
