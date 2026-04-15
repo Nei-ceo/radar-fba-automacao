@@ -2,8 +2,8 @@ name: Mineracao Automatica Amazon
 
 on:
   schedule:
-    - cron: '0 08 * * *' # Roda às 05:00 da manhã de Brasília
-  workflow_dispatch: # Ativa o botão manual
+    - cron: '0 08 * * *'
+  workflow_dispatch: 
 
 jobs:
   mineracao:
@@ -15,16 +15,20 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Instalar tudo
+          
+      - name: Instalar Dependencias
         run: |
-          pip install streamlit playwright pandas
+          pip install playwright
+          pip install -r requirements.txt
           playwright install chromium
-      - name: Rodar Robo
+
+      - name: Executar Robo
         run: python robo.py
+
       - name: Salvar no GitHub
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add dados_fba.json
-          git commit -m "Update automatico" || exit 0
+          git commit -m "Update automatico: $(date +'%Y-%m-%d %H:%M')" || exit 0
           git push
