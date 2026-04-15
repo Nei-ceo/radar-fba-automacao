@@ -1,0 +1,32 @@
+name: Mineracao Manual Amazon
+
+on:
+  workflow_dispatch: # Ativa o botão de "Play" manual
+
+jobs:
+  mineracao:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do codigo
+        uses: actions/checkout@v3
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias
+        run: |
+          pip install -r requirements.txt
+          playwright install chromium
+
+      - name: Executar Robo
+        run: python robo.py
+
+      - name: Salvar resultados
+        run: |
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git add dados_fba.json
+          git commit -m "Execução manual do robô" || exit 0
+          git push
