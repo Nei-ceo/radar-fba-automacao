@@ -1,60 +1,66 @@
 import asyncio
 import sys
 import json
+import random
 from playwright.async_api import async_playwright
 
 async def run():
     async with async_playwright() as p:
-        # Camuflagem para o site não saber que é um robô automatizado
+        # 1. Argumentos furtivos para enganar o Firewall
         browser = await p.chromium.launch(
             headless=True,
-            args=["--disable-blink-features=AutomationControlled"]
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
+                "--no-sandbox"
+            ]
         )
+        
+        # 2. Perfil 100% Humano e Brasileiro
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1920, "height": 1080}
+            viewport={"width": 1366, "height": 768},
+            locale="pt-BR",
+            timezone_id="America/Sao_Paulo",
+            has_touch=False
         )
+        
         page = await context.new_page()
+
+        # 3. Injeção de script (Apaga a etiqueta "Sou um Robô" do navegador)
+        await page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            window.chrome = { runtime: {} };
+        """)
         
         url_utimix = "https://www.utimix.com/novidades/?utm_source=brevo&utm_campaign=Seguimento%20%201%20Pedido%20-%204%20envio&utm_medium=email&utm_id=22"
         
-        print("🔗 Acessando Utimix (Modo Investigador)...")
+        print("🔗 Iniciando Operação Stealth na Utimix...")
         try:
             await page.goto(url_utimix, wait_until="domcontentloaded", timeout=60000)
-            await asyncio.sleep(5)
             
-            # --- DIAGNÓSTICO: O QUE O ROBÔ ESTÁ A VER? ---
-            titulo = await page.title()
-            print(f"👀 Título da Página lido pelo robô: '{titulo}'")
+            # 4. Simulação de Leitura (Pausas e movimentos aleatórios)
+            print("🖱️ Simulando comportamento humano...")
+            await asyncio.sleep(random.uniform(2.0, 4.0))
             
-            texto_pagina = await page.evaluate("document.body.innerText")
-            print(f"📝 Primeiras palavras na tela: '{texto_pagina[:150].strip()}'...")
-            
-            if "Cloudflare" in titulo or "Access Denied" in titulo or "Security" in titulo or "Just a moment" in titulo:
-                print("🚨 ALERTA VERMELHO: O site ativou a defesa Anti-Bot contra o GitHub.")
-                await browser.close()
-                return
-            # ----------------------------------------------
-
-            print("📜 Rolando a página para renderizar imagens e preços...")
             for _ in range(4):
-                await page.mouse.wheel(0, 800)
-                await asyncio.sleep(2)
+                # Rola a página e mexe o mouse de forma errática
+                await page.mouse.wheel(0, random.randint(400, 800))
+                await page.mouse.move(random.randint(100, 700), random.randint(100, 500))
+                await asyncio.sleep(random.uniform(1.5, 3.5))
 
-            # Busca extrema: Ignora nomes de classes e procura a estrutura visual
+            # Motor visual de extração
             produtos_utimix = await page.evaluate('''() => {
                 const todosElementos = Array.from(document.querySelectorAll('*'));
                 const candidatos = [];
 
                 todosElementos.forEach(el => {
                     const texto = el.innerText || "";
-                    // Se tem "R$", uma imagem, um link, e não é a página inteira (<300 letras)
                     if (texto.includes('R$') && el.querySelector('img') && el.querySelector('a') && texto.length < 300) {
                         candidatos.push(el);
                     }
                 });
 
-                // Remove elementos duplicados (caixas dentro de caixas)
                 const unicos = [];
                 candidatos.forEach(c => {
                     if (!candidatos.some(outro => outro !== c && outro.contains(c))) {
@@ -69,7 +75,7 @@ async def run():
 
                     linhas.forEach(linha => {
                         if (linha.includes('R$')) {
-                            preco = linha.replace(/[^0-9,]/g, ''); // Extrai só os números
+                            preco = linha.replace(/[^0-9,]/g, ''); 
                         } else if (linha.length > 5 && !linha.toLowerCase().includes('novo') && !linha.toLowerCase().includes('partir') && !nome) {
                             nome = linha;
                         }
@@ -80,10 +86,10 @@ async def run():
                 }).filter(p => p.nome && p.preco !== "0");
             }''')
             
-            print(f"📦 Sucesso! Encontrados {len(produtos_utimix)} produtos após diagnóstico.")
+            print(f"📦 Bypass concluído! Encontrados {len(produtos_utimix)} produtos.")
 
             if len(produtos_utimix) == 0:
-                print("⚠️ Ainda 0 produtos. Envie-me o log acima para eu ver o Título e o Texto da página.")
+                print("⚠️ Bloqueio severo por IP detectado.")
                 await browser.close()
                 return
 
@@ -96,10 +102,10 @@ async def run():
         for item in produtos_utimix[:30]:
             try:
                 termo_busca = item['nome'].split('-')[-1].strip()
-                print(f"🔍 Buscando na Amazon: {termo_busca[:30]}...")
+                print(f"🔍 Cruzando Amazon: {termo_busca[:30]}...")
                 
-                await page.goto(f"https://www.amazon.com.br/s?k={termo_busca.replace(' ', '+')}", wait_until="domcontentloaded", timeout=60000)
-                await asyncio.sleep(2)
+                await page.goto(f"https://www.amazon.com.br/s?k={termo_busca.replace(' ', '+')}", wait_until="domcontentloaded")
+                await asyncio.sleep(random.uniform(1.5, 2.5)) # Pausa humana na Amazon também
 
                 card = await page.query_selector(".s-result-item[data-asin]")
                 if card:
@@ -131,7 +137,7 @@ async def run():
             json.dump(resultados, f, indent=2, ensure_ascii=False)
         
         await browser.close()
-        print(f"✅ Terminado: {len(resultados)} cruzamentos gerados.")
+        print(f"✅ Missão cumprida: {len(resultados)} produtos avaliados.")
 
 if __name__ == "__main__":
     asyncio.run(run())
