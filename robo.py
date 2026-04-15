@@ -13,24 +13,35 @@ async def run():
         
         print("🔗 Acessando Novidades Utimix...")
         try:
-            await page.goto(url_utimix, wait_until="domcontentloaded", timeout=60000)
-            await page.mouse.wheel(0, 1500)
-            await asyncio.sleep(4)
+            # Vai para a página e espera até que não haja atividade na rede
+            await page.goto(url_utimix, wait_until="networkidle", timeout=60000)
             
-            # Agora capturamos o NOME, PREÇO e a IMAGEM da Utimix
+            # Força o scroll para carregar todos os elementos visíveis
+            print("📜 Rolando a página para carregar imagens e preços...")
+            for _ in range(3):
+                await page.mouse.wheel(0, 800)
+                await asyncio.sleep(2)
+
+            # Espera até que um produto específico seja visível no DOM
+            await page.wait_for_selector('.product-item', timeout=15000)
+            
             produtos_utimix = await page.evaluate('''() => {
-                const cards = Array.from(document.querySelectorAll('.product-item, .item, .product-card, div.product'));
+                const cards = Array.from(document.querySelectorAll('.product-item'));
                 return cards.map(c => {
-                    const nome = (c.querySelector('.product-name a, .name, h2, h3, .product-title')?.innerText || "").trim();
-                    const preco = (c.querySelector('.price, .preco, .best-price')?.innerText || "").replace('R$', '').trim();
-                    const img = c.querySelector('img')?.src || ""; // Captura a foto
+                    const nome = (c.querySelector('.product-name a')?.innerText || "").trim();
+                    const precoText = c.querySelector('.price')?.innerText || "";
+                    // Limpa o texto do preço, ex: "A partir de: R$ 8,99" para "8,99"
+                    const precoMatch = precoText.match(/R\\$\\s*([0-9.,]+)/);
+                    const preco = precoMatch ? precoMatch[1].trim() : "0";
+                    const img = c.querySelector('img')?.src || "";
                     return { nome, preco, img };
-                }).filter(p => p.nome.length > 3 && p.preco && p.preco !== "0");
+                }).filter(p => p.nome.length > 3 && p.preco !== "0");
             }''')
             
             print(f"📦 Encontrados {len(produtos_utimix)} produtos para análise visual.")
 
             if len(produtos_utimix) == 0:
+                print("⚠️ Falha ao encontrar produtos após rolagem e espera.")
                 await browser.close()
                 return
 
@@ -45,14 +56,14 @@ async def run():
                 termo_busca = item['nome'].split('-')[-1].strip()
                 print(f"🔍 Buscando na Amazon: {termo_busca}")
                 
-                await page.goto(f"https://www.amazon.com.br/s?k={termo_busca.replace(' ', '+')}", wait_until="domcontentloaded")
+                await page.goto(f"https://www.amazon.com.br/s?k={termo_busca.replace(' ', '+')}", wait_until="domcontentloaded", timeout=60000)
                 await asyncio.sleep(2)
 
                 card = await page.query_selector(".s-result-item[data-asin]")
                 if card:
                     asin = await card.get_attribute("data-asin")
                     preco_amz_el = await card.query_selector(".a-price-whole")
-                    img_amz_el = await card.query_selector(".s-image") # Captura foto da Amazon
+                    img_amz_el = await card.query_selector(".s-image")
                     
                     if preco_amz_el and img_amz_el:
                         venda = float((await preco_amz_el.inner_text()).replace('.', '').replace(',', '.').strip())
@@ -68,10 +79,11 @@ async def run():
                             "lucro_liquido": lucro,
                             "roi": round((lucro / custo) * 100, 2) if custo > 0 else 0,
                             "link": f"https://www.amazon.com.br/dp/{asin}",
-                            "img_utimix": item['img'], # Salva foto fornecedor
-                            "img_amazon": img_amz # Salva foto concorrente
+                            "img_utimix": item['img'],
+                            "img_amazon": img_amz
                         })
-            except:
+            except Exception as e:
+                print(f"Erro ao cruzar {item['nome']}: {e}")
                 continue
 
         with open("dados_fba.json", "w", encoding="utf-8") as f:
