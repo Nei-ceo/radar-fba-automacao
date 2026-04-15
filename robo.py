@@ -6,60 +6,59 @@ from playwright.async_api import async_playwright
 async def run():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
-        # Simulamos um navegador real para evitar bloqueios do servidor
         context = await browser.new_context(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
         page = await context.new_page()
         
-        # Link exato que enviou
         url_utimix = "https://www.utimix.com/novidades/?utm_source=brevo&utm_campaign=Seguimento%20%201%20Pedido%20-%204%20envio&utm_medium=email&utm_id=22"
         
         print("🔗 Acessando Novidades Utimix...")
         try:
-            # 'commit' faz com que ele comece a ler assim que o HTML chegar, sem esperar imagens/rastreadores
-            await page.goto(url_utimix, wait_until="commit", timeout=60000)
+            await page.goto(url_utimix, wait_until="domcontentloaded", timeout=60000)
+            await page.mouse.wheel(0, 1500)
+            await asyncio.sleep(4)
             
-            # Espera apenas 5 segundos para o catálogo renderizar
-            await asyncio.sleep(5)
-            
-            # Extração focada nos seletores de preço e nome da Utimix
+            # Agora capturamos o NOME, PREÇO e a IMAGEM da Utimix
             produtos_utimix = await page.evaluate('''() => {
-                const cards = Array.from(document.querySelectorAll('.product-item'));
+                const cards = Array.from(document.querySelectorAll('.product-item, .item, .product-card, div.product'));
                 return cards.map(c => {
-                    const nome = c.querySelector('.product-name a')?.innerText.trim();
-                    const preco = c.querySelector('.price')?.innerText.replace('R$', '').trim();
-                    return { nome, preco };
-                }).filter(p => p.nome && p.preco && p.preco !== "0");
+                    const nome = (c.querySelector('.product-name a, .name, h2, h3, .product-title')?.innerText || "").trim();
+                    const preco = (c.querySelector('.price, .preco, .best-price')?.innerText || "").replace('R$', '').trim();
+                    const img = c.querySelector('img')?.src || ""; // Captura a foto
+                    return { nome, preco, img };
+                }).filter(p => p.nome.length > 3 && p.preco && p.preco !== "0");
             }''')
             
-            print(f"📦 Sucesso! Encontrados {len(produtos_utimix)} produtos com preço visível.")
+            print(f"📦 Encontrados {len(produtos_utimix)} produtos para análise visual.")
+
+            if len(produtos_utimix) == 0:
+                await browser.close()
+                return
 
         except Exception as e:
-            print(f"❌ Erro ao aceder à Utimix: {e}")
+            print(f"❌ Erro Utimix: {e}")
             await browser.close()
             return
 
         resultados = []
-        # Analisamos os primeiros 30 para manter a execução rápida e segura
         for item in produtos_utimix[:30]:
             try:
-                # Limpa o nome para a busca na Amazon (remove referências e códigos)
                 termo_busca = item['nome'].split('-')[-1].strip()
-                print(f"🔍 Cruzando na Amazon: {termo_busca}")
+                print(f"🔍 Buscando na Amazon: {termo_busca}")
                 
                 await page.goto(f"https://www.amazon.com.br/s?k={termo_busca.replace(' ', '+')}", wait_until="domcontentloaded")
                 await asyncio.sleep(2)
 
-                # Captura o primeiro anúncio relevante
                 card = await page.query_selector(".s-result-item[data-asin]")
                 if card:
                     asin = await card.get_attribute("data-asin")
                     preco_amz_el = await card.query_selector(".a-price-whole")
+                    img_amz_el = await card.query_selector(".s-image") # Captura foto da Amazon
                     
-                    if preco_amz_el:
+                    if preco_amz_el and img_amz_el:
                         venda = float((await preco_amz_el.inner_text()).replace('.', '').replace(',', '.').strip())
                         custo = float(item['preco'].replace('.', '').replace(',', '.').strip())
+                        img_amz = await img_amz_el.get_attribute("src")
                         
-                        # Cálculo: Venda - Custo - (15% Comissão + R$ 13 taxa FBA estimada)
                         lucro = round(venda - custo - (venda * 0.15 + 13), 2)
                         
                         resultados.append({
@@ -68,17 +67,18 @@ async def run():
                             "custo_utimix": custo,
                             "lucro_liquido": lucro,
                             "roi": round((lucro / custo) * 100, 2) if custo > 0 else 0,
-                            "link": f"https://www.amazon.com.br/dp/{asin}"
+                            "link": f"https://www.amazon.com.br/dp/{asin}",
+                            "img_utimix": item['img'], # Salva foto fornecedor
+                            "img_amazon": img_amz # Salva foto concorrente
                         })
             except:
                 continue
 
-        # Guarda os dados para o seu Dashboard
         with open("dados_fba.json", "w", encoding="utf-8") as f:
             json.dump(resultados, f, indent=2, ensure_ascii=False)
         
         await browser.close()
-        print(f"✅ Processo concluído. Verifique o seu Dashboard!")
+        print(f"✅ Análise concluída: {len(resultados)} cruzamentos gerados.")
 
 if __name__ == "__main__":
     asyncio.run(run())
